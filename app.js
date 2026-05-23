@@ -1,0 +1,135 @@
+if(process.env.NODE_ENV != "production"){
+ require('dotenv').config();
+}
+const express = require("express");
+const app = express();
+const port = 8080;
+const mongoose = require("mongoose");
+const ejs = require("ejs");
+const path = require("path");
+const methodOverride = require('method-override');
+const ejsMate = require("ejs-mate");
+const ExpressError = require("./utils/expressError.js");
+const listingRouter = require("./routes/listing.js")
+const reviewRouter = require("./routes/review.js")
+const userRouter = require("./routes/user.js")
+const session = require("express-session")
+const MongoStore = require('connect-mongo').default;
+const flash = require("connect-flash")
+const passport = require("passport")
+const LocalStratrgy = require("passport-local")
+const User = require("./models/user.js")
+
+app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, "views"));
+app.use(express.urlencoded({ extended: true }));
+app.use(methodOverride("_method"));
+app.engine('ejs', ejsMate);
+app.use(express.static(path.join(__dirname, "public")))
+
+
+// connecting to database
+const dbUrl = process.env.ATLASDB_URL;
+console.log(dbUrl);
+async function main() {
+  await mongoose.connect(dbUrl)
+}
+
+main().then(() => {
+  console.log("connected database!")
+}).catch((error) => {
+  console.log(error)
+})
+
+const store = MongoStore.create({
+  mongoUrl: dbUrl,
+  crypto: {
+    secret: process.env.SECRET,
+  },
+  touchAfter: 24 * 3600,
+})
+
+store.on("error", (err) => {
+  console.log("ERROR in MONGO SESSION STORE", err)
+})
+
+// session 
+const sessionOption = {
+  store,
+  secret: process.env.SECRET,
+  resave: false,
+  saveUninitialized: true,
+  cookie: {
+    expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    httpOnly: true,
+  }
+}
+
+// get request
+// app.get("/", (req, res) => {
+//   res.send("server is working")
+// })
+
+app.use(session(sessionOption))
+app.use(flash()) // using flash
+
+app.use(passport.initialize())
+app.use(passport.session())
+passport.use(new LocalStratrgy(User.authenticate()))
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
+
+app.use((req, res, next) => {
+  res.locals.scuess = req.flash("scuess");
+  res.locals.error = req.flash("error");
+  res.locals.currUser = req.user;
+  next();
+});
+
+// app.get("/demouser", async (req, res) => {
+//   let fakeUser = new User({
+//     email: "student@gmail.com",
+//     username: "delta-student"
+//   });
+//   let newUser = await User.register(fakeUser, "helloworld")
+//   res.send(newUser);
+// })
+
+// express router -> restructuring listng & reviews
+app.use("/listings", listingRouter)
+app.use("/listings/:id/reviews", reviewRouter)
+app.use("/", userRouter)
+
+// middleware 
+app.all("*", (req, res, next) => {
+  next(new ExpressError(404, "Page Not Found"))
+})
+
+app.use((err, req, res, next) => {
+  let { statusCode = 500, message = "some things went wrong" } = err;
+  res.status(statusCode).render("error.ejs", { message })
+  //  res.status(statusCode).send(message);
+})
+
+app.listen(port, () => {
+  console.log(`server is listing on port ${port}`)
+})
+
+
+// save to db test
+// app.get("/test", async (req, res) => {
+//   const simplelisting = new listing({
+//     title: "my new villa",
+//     description: "By the Beach",
+
+//     price: 1200,
+//     location: "Manali, Himachal Pardesh",
+//     country: "India"
+//   })
+//   await simplelisting.save();
+//   console.log("saved scuessfully")
+
+//   res.send("scuessfully testing")
+// })
